@@ -7,7 +7,7 @@ import itertools
 import datetime
 import random
 import os
-
+from elastic_transform import elastic_transform
 parser = argparse.ArgumentParser(description='finds contours')
 parser.add_argument("--item-list", type = str, default="items.pkl")
 parser.add_argument("--image-dir", type = str, default="../Data/images")
@@ -50,7 +50,7 @@ def translate_item(img, tx, ty):
 
 def apply_random_transforms(img, mask, angle_range):
     # scale
-    scale = random.uniform(0, 1)
+    scale = random.uniform(0.2, 1)
     img = scale_item(img, scale)
     mask = scale_item(mask, scale)
     # rotate
@@ -71,7 +71,8 @@ def apply_random_transforms(img, mask, angle_range):
 # generate_images stiches the provided items together into a single image with annotations
 def generate_image(items, image_dir, out_dir, angle_range = 25):
     global generated_count, annotation_count
-    out_image = np.full((512, 512, 3), np.random.randint(255, size=3, dtype=np.uint8), np.uint8)
+    #out_image = np.full((512, 512, 3), np.random.randint(255, size=3, dtype=np.uint8), np.uint8)
+    out_image = np.random.randint(0, 255, size=(512, 512, 3), dtype=np.uint8)
     image_data = { "id": generated_count, "file_name": str(generated_count) + '.jpg', "width": 512, "height": 512} # coco images section
     annotations_data = []
     for _, item in items.iterrows():
@@ -85,6 +86,12 @@ def generate_image(items, image_dir, out_dir, angle_range = 25):
         mask = np.zeros((512,512,3), dtype=np.uint8)
         cv2.drawContours(mask, [cnt], 0, (255, 255, 255), -1)
         img, mask = apply_random_transforms(img, mask, angle_range)
+    
+        # elastic transform
+        img, mask = elastic_transform(img, mask, img.shape[1]*2, img.shape[1]*0.08, img.shape[1]*0.08)
+
+
+    
         # after random transforms, masks no longer match contours
         # so they have to be found again
         mask_gray = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
@@ -132,12 +139,12 @@ def main():
 
     for i in range(0, args.samples):
         sample_items = items.sample(2)
-        try:
-            image, annotations = generate_image(sample_items, args.image_dir, args.out_dir)
-            dataset['images'].append(image)
-            dataset['annotations'] = dataset['annotations'] + annotations
-        except:
-            print("sample", str(i), "failed. maybe the countour was not good enough?")
+        #try:
+        image, annotations = generate_image(sample_items, args.image_dir, args.out_dir)
+        dataset['images'].append(image)
+        dataset['annotations'] = dataset['annotations'] + annotations
+        #except:
+        print("sample", str(i), "failed. maybe the countour was not good enough?")
 
     with open('annotations.json', 'w') as f:
         json.dump(dataset, f)
