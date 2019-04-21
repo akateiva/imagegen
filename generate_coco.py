@@ -137,10 +137,10 @@ def main():
             dataset['images'].append(image)
             dataset['annotations'] = dataset['annotations'] + annotations
         except:
-            print("item", item, "failed. maybe the countour was not good enough?")
+            print("sample", str(i), "failed. maybe the countour was not good enough?")
 
-        with open('annotations.json', 'w') as f:
-            json.dump(dataset, f)
+    with open('annotations.json', 'w') as f:
+        json.dump(dataset, f)
 
     
 if __name__ == '__main__':
