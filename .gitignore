@@ -1,0 +1,4 @@
+out/
+annotations.json
+.DS_Store
+items_contours.pkl
