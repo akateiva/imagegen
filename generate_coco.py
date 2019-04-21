@@ -12,6 +12,7 @@ parser = argparse.ArgumentParser(description='finds contours')
 parser.add_argument("--item-list", type = str, default="items.pkl")
 parser.add_argument("--image-dir", type = str, default="../Data/images")
 parser.add_argument("--out-dir", type = str, default="./out")
+parser.add_argument("--samples", type = int, default=30)
 
 
 categories = [
@@ -50,12 +51,10 @@ def translate_item(img, tx, ty):
 def apply_random_transforms(img, mask, angle_range):
     # scale
     scale = random.uniform(0, 1)
-    print("scaling item to ", scale)
     img = scale_item(img, scale)
     mask = scale_item(mask, scale)
     # rotate
     angle = random.randint(-angle_range, angle_range)
-    print("rotating item", angle, "degrees")
     img = rotate_item(img, angle)
     mask = rotate_item(mask, angle)
     # translate
@@ -69,13 +68,15 @@ def apply_random_transforms(img, mask, angle_range):
     #img = elastic_transform(img, 666, 0.2)
 
 
+# generate_images stiches the provided items together into a single image with annotations
 def generate_image(items, image_dir, out_dir, angle_range = 25):
     global generated_count, annotation_count
     out_image = np.full((512, 512, 3), np.random.randint(255, size=3, dtype=np.uint8), np.uint8)
     image_data = { "id": generated_count, "file_name": str(generated_count) + '.jpg', "width": 512, "height": 512} # coco images section
     annotations_data = []
-    for item in items:
+    for _, item in items.iterrows():
         # place each of the item images in out_image
+        # TODO: Cache
         img = cv2.imread(os.path.join(image_dir, item.img))
         cnt = item['contour']
         # rescale into 512 x 512
@@ -83,13 +84,22 @@ def generate_image(items, image_dir, out_dir, angle_range = 25):
         img = cv2.resize(img, (512, 512))
         mask = np.zeros((512,512,3), dtype=np.uint8)
         cv2.drawContours(mask, [cnt], 0, (255, 255, 255), -1)
-
         img, mask = apply_random_transforms(img, mask, angle_range)
-
+        # after random transforms, masks no longer match contours
+        # so they have to be found again
+        mask_gray = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+        _, contours, _ = cv2.findContours(mask_gray, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+        cnt = max(contours, key= cv2.contourArea)
+        epsilon = 0.0015*cv2.arcLength(cnt,True)
+        # approximate contour to reduce 
+        approx = cv2.approxPolyDP(cnt,epsilon,True) 
         np.copyto(out_image, img, where=mask>0)
 
+        # now mask must be RLE encoded
+        # and bbox found with simple contours thing
+
         annotations_data.append({
-            "segmentation": [cnt.ravel().tolist()],
+            "segmentation": [approx.ravel().tolist()],
             "area": cv2.contourArea(cnt),
             "iscrowd": 0,
             "image_id": image_data['id'],
@@ -99,9 +109,6 @@ def generate_image(items, image_dir, out_dir, angle_range = 25):
             })
         annotation_count = annotation_count + 1 
 
-        cv2.imshow('image', out_image)
-        cv2.imshow('mask', mask)
-        cv2.waitKey(200) 
     cv2.imwrite(os.path.join(out_dir, image_data['file_name']), out_image)
     generated_count = generated_count + 1
     return image_data, annotations_data
@@ -123,27 +130,17 @@ def main():
             "categories": categories,
             }
 
-    for _, item in items.iterrows():
-        image, annotations = generate_image([item], args.image_dir, args.out_dir)
-        dataset['images'].append(image)
-        dataset['annotations'] = dataset['annotations'] + annotations
+    for i in range(0, args.samples):
+        sample_items = items.sample(2)
+        try:
+            image, annotations = generate_image(sample_items, args.image_dir, args.out_dir)
+            dataset['images'].append(image)
+            dataset['annotations'] = dataset['annotations'] + annotations
+        except:
+            print("item", item, "failed. maybe the countour was not good enough?")
 
-        
         with open('annotations.json', 'w') as f:
             json.dump(dataset, f)
-
-    # find distribution of data
-    #distribution = items.groupby('category_id').count() / len(items)
-    #distribution = items['category_id'].value_counts() / len(items)
-    #print(distribution)
-    #return
-    
-
-    #for i in range(0, 100):
-    #    sample = items.sample(1)
-    #    print(sample)
-    #    image_data, annotations_data = generate_image(sample, args.image_dir, args.out_dir)
-    #    print(image_data, annotations_data)
 
     
 if __name__ == '__main__':
