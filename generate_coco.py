@@ -30,6 +30,7 @@ categories = [
 
 generated_count = 0;
 annotation_count = 0;
+kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(5,5))
 
 # rotates an image by angle in degrees
 def rotate_item(img, angle):
@@ -50,7 +51,7 @@ def translate_item(img, tx, ty):
 
 def apply_random_transforms(img, mask, angle_range):
     # scale
-    scale = random.uniform(0.2, 1)
+    scale = random.uniform(0.2, 0.9)
     img = scale_item(img, scale)
     mask = scale_item(mask, scale)
     # rotate
@@ -58,8 +59,8 @@ def apply_random_transforms(img, mask, angle_range):
     img = rotate_item(img, angle)
     mask = rotate_item(mask, angle)
     # translate
-    tx = random.uniform(-0.25, 0.25)
-    ty = random.uniform(-0.25, 0.25)
+    tx = random.uniform(-0.35, 0.35)
+    ty = random.uniform(-0.35, 0.35)
     img = translate_item(img, tx, ty)
     mask = translate_item(mask, tx, ty)
     return img, mask
@@ -88,9 +89,8 @@ def generate_image(items, image_dir, out_dir, angle_range = 25):
         img, mask = apply_random_transforms(img, mask, angle_range)
     
         # elastic transform
-        img, mask = elastic_transform(img, mask, img.shape[1]*2, img.shape[1]*0.08, img.shape[1]*0.08)
-
-
+        #img, mask = elastic_transform(img, mask, img.shape[1]*5, img.shape[1]*0.08, img.shape[1]*0.08)
+        mask = cv2.erode(mask, kernel, iterations=2)
     
         # after random transforms, masks no longer match contours
         # so they have to be found again
@@ -125,7 +125,13 @@ def main():
     print("loading item contours")
     items = pd.read_pickle(args.item_list)
     print("loaded", len(items), "with contours")
-    print(items)
+
+    # compute the weights per category so that each item can be sampled from a uniform category distribution
+    category_item_weights = items.groupby('category_id')['img'].count().apply(lambda x: 1/x).rename('item_weight')
+    items = items.join(category_item_weights, on='category_id')
+    print("computed category item weights", category_item_weights)
+
+    print(items.describe())
 
     dataset = {
             "info": {
@@ -138,13 +144,13 @@ def main():
             }
 
     for i in range(0, args.samples):
-        sample_items = items.sample(2)
-        #try:
-        image, annotations = generate_image(sample_items, args.image_dir, args.out_dir)
-        dataset['images'].append(image)
-        dataset['annotations'] = dataset['annotations'] + annotations
-        #except:
-        print("sample", str(i), "failed. maybe the countour was not good enough?")
+        sample_items = items.sample(2, weights=items['item_weight'])
+        try:
+            image, annotations = generate_image(sample_items, args.image_dir, args.out_dir)
+            dataset['images'].append(image)
+            dataset['annotations'] = dataset['annotations'] + annotations
+        except:
+            print("sample", str(i), "failed. maybe the countour was not good enough?")
 
     with open('annotations.json', 'w') as f:
         json.dump(dataset, f)
