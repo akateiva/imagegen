@@ -38,4 +38,4 @@ def elastic_transform(image, mask, alpha, sigma, alpha_affine, random_state=None
     
     indices = np.reshape(y+dy, (-1, 1)), np.reshape(x+dx, (-1, 1)), np.reshape(z, (-1, 1))
 
-    return map_coordinates(image, indices, order=1, mode='reflect').reshape(shape), map_coordinates(mask, indices, order=1, mode='reflect').reshape(shape)
+    return map_coordinates(image, indices, order=1, mode='constant').reshape(shape), map_coordinates(mask, indices, order=1, mode='constant').reshape(shape)

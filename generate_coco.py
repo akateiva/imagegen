@@ -12,7 +12,10 @@ parser = argparse.ArgumentParser(description='finds contours')
 parser.add_argument("--item-list", type = str, default="items.pkl")
 parser.add_argument("--image-dir", type = str, default="../Data/images")
 parser.add_argument("--out-dir", type = str, default="./out")
-parser.add_argument("--samples", type = int, default=30)
+parser.add_argument("--n-samples", type = int, default=30)
+parser.add_argument("--n-items-per-sample", type = int, default=2)
+parser.add_argument("--use-elastic-transform", type = bool, default=False)
+parser.add_argument("--use-noise-bg", type = bool, default=False)
 
 
 categories = [
@@ -70,10 +73,13 @@ def apply_random_transforms(img, mask, angle_range):
 
 
 # generate_images stiches the provided items together into a single image with annotations
-def generate_image(items, image_dir, out_dir, angle_range = 25):
+def generate_image(items, image_dir, out_dir, angle_range = 25, use_elastic_transform = False, use_noise_bg = False):
     global generated_count, annotation_count
-    #out_image = np.full((512, 512, 3), np.random.randint(255, size=3, dtype=np.uint8), np.uint8)
-    out_image = np.random.randint(0, 255, size=(512, 512, 3), dtype=np.uint8)
+
+    out_image = np.full((512, 512, 3), np.random.randint(255, size=3, dtype=np.uint8), np.uint8)
+    if use_noise_bg:
+        out_image = np.random.randint(0, 255, size=(512, 512, 3), dtype=np.uint8)
+
     image_data = { "id": generated_count, "file_name": str(generated_count) + '.jpg', "width": 512, "height": 512} # coco images section
     annotations_data = []
     for _, item in items.iterrows():
@@ -89,7 +95,8 @@ def generate_image(items, image_dir, out_dir, angle_range = 25):
         img, mask = apply_random_transforms(img, mask, angle_range)
     
         # elastic transform
-        #img, mask = elastic_transform(img, mask, img.shape[1]*5, img.shape[1]*0.08, img.shape[1]*0.08)
+        if use_elastic_transform:
+            img, mask = elastic_transform(img, mask, img.shape[1]*1.5, img.shape[1]*0.08, img.shape[1]*0.08)
         mask = cv2.erode(mask, kernel, iterations=2)
     
         # after random transforms, masks no longer match contours
@@ -102,9 +109,6 @@ def generate_image(items, image_dir, out_dir, angle_range = 25):
         approx = cv2.approxPolyDP(cnt,epsilon,True) 
         np.copyto(out_image, img, where=mask>0)
 
-        # now mask must be RLE encoded
-        # and bbox found with simple contours thing
-
         annotations_data.append({
             "segmentation": [approx.ravel().tolist()],
             "area": cv2.contourArea(cnt),
@@ -116,7 +120,7 @@ def generate_image(items, image_dir, out_dir, angle_range = 25):
             })
         annotation_count = annotation_count + 1 
 
-    cv2.imwrite(os.path.join(out_dir, image_data['file_name']), out_image)
+    cv2.imwrite(os.path.join(out_dir, 'images', image_data['file_name']), out_image)
     generated_count = generated_count + 1
     return image_data, annotations_data
 
@@ -130,8 +134,14 @@ def main():
     category_item_weights = items.groupby('category_id')['img'].count().apply(lambda x: 1/x).rename('item_weight')
     items = items.join(category_item_weights, on='category_id')
     print("computed category item weights", category_item_weights)
-
     print(items.describe())
+
+    generate_dataset(args.out_dir, items, args.image_dir, args.n_samples, args.n_items_per_sample, args.use_elastic_transform, args.use_noise_bg)
+
+    
+def generate_dataset(out_dir, items, image_dir, n_samples, n_items_per_sample, use_elastic_transform, use_noise_bg):
+    print('> preparing directories')
+    os.makedirs(os.path.join(out_dir, 'images/'))
 
     dataset = {
             "info": {
@@ -143,18 +153,19 @@ def main():
             "categories": categories,
             }
 
-    for i in range(0, args.samples):
-        sample_items = items.sample(2, weights=items['item_weight'])
+    for i in range(0, n_samples):
+        sample_items = items.sample(n_items_per_sample, weights=items['item_weight'])
         try:
-            image, annotations = generate_image(sample_items, args.image_dir, args.out_dir)
+            image, annotations = generate_image(sample_items, image_dir, out_dir, use_elastic_transform=use_elastic_transform, use_noise_bg=use_noise_bg)
             dataset['images'].append(image)
             dataset['annotations'] = dataset['annotations'] + annotations
         except:
             print("sample", str(i), "failed. maybe the countour was not good enough?")
-
-    with open('annotations.json', 'w') as f:
-        json.dump(dataset, f)
-
     
+    print('> writing annotations')
+    with open(os.path.join(out_dir, 'annotations.json'), 'w') as f:
+        json.dump(dataset, f)
+    print('> done')
+
 if __name__ == '__main__':
     main()
