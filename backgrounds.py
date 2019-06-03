@@ -17,6 +17,9 @@ def indoor_scene_bg_gen(im_size, bg_img_dir, enforce_size=True):
     print('backgrounds.py', len(image_files), 'background images found')
     for image_file in image_files:
         img = cv2.imread(image_file)
+        if img is None:
+            print('failed to read {}'.format(image_file))
+            continue;
         if enforce_size:
             scale = min(im_size)/min(img.shape[:-1])
             img = cv2.resize(img, None, fx=scale, fy=scale, interpolation=cv2.INTER_LINEAR)
