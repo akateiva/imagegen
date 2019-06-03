@@ -4,7 +4,7 @@ from scipy.ndimage.interpolation import map_coordinates
 import cv2
 
 # Function to distort image
-def elastic_transform(image, mask, alpha, sigma, alpha_affine, random_state=None):
+def elastic_transform(image, alpha, sigma, alpha_affine, random_state=None):
     """Elastic deformation of images as described in [Simard2003]_ (with modifications).
     .. [Simard2003] Simard, Steinkraus and Platt, "Best Practices for
          Convolutional Neural Networks applied to Visual Document Analysis", in
@@ -27,15 +27,11 @@ def elastic_transform(image, mask, alpha, sigma, alpha_affine, random_state=None
     M = cv2.getAffineTransform(pts1, pts2)
     image = cv2.warpAffine(image, M, shape_size[::-1], borderMode=cv2.BORDER_REFLECT_101)
 
-    mask = cv2.warpAffine(mask, M, shape_size[::-1], borderMode=cv2.BORDER_REFLECT_101)
-
     dx = gaussian_filter((random_state.rand(*shape) * 2 - 1), sigma) * alpha
     dy = gaussian_filter((random_state.rand(*shape) * 2 - 1), sigma) * alpha
     dz = np.zeros_like(dx)
 
     x, y, z = np.meshgrid(np.arange(shape[1]), np.arange(shape[0]), np.arange(shape[2]))
     indices = np.reshape(y+dy, (-1, 1)), np.reshape(x+dx, (-1, 1)), np.reshape(z, (-1, 1))
-    
-    indices = np.reshape(y+dy, (-1, 1)), np.reshape(x+dx, (-1, 1)), np.reshape(z, (-1, 1))
 
-    return map_coordinates(image, indices, order=1, mode='constant').reshape(shape), map_coordinates(mask, indices, order=1, mode='constant').reshape(shape)
+    return map_coordinates(image, indices, order=1, mode='reflect').reshape(shape)
