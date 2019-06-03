@@ -44,15 +44,13 @@ def mask_to_poly(mask):
 
 # pastes the item into the image and then returns the image and an annotation
 def paste_item_into_image(item, image, angle_range=15):
-    image_dir = '../Data/images'
-
     # first we define the bbox where we going to paste the item
     x, y = ((np.random.rand(2) * MAX_TRANSLATE + TRANSLATE_OFFSET ) * image.shape[:-1]).astype(int)
     #x, y = (np.random.normal(loc=0.3, scale=0.10, size=2)* image.shape[:-1]).astype(int)
     w = h = int(max(MIN_SCALE, np.random.rand()*MAX_SCALE) * min(image.shape[:-1]))
 
     # we rescale the image and contour to the desired bbox dimensions
-    item_image = cv2.imread(os.path.join(image_dir, item.img))       # item image
+    item_image = cv2.imread(os.path.join(args.image_dir, item.img))       # item image
     cnt = item['contour']                                            # the contour
     cnt = (cnt * (w / item_image.shape[0])).astype(int)              # resize contour to desired dimensions
     item_image = cv2.resize(item_image, (w, h))    
