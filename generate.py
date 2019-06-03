@@ -111,7 +111,7 @@ if args.bg == 'plain':
 elif args.bg == 'noise':
     bg_gen = backgrounds.random_noise_bg_gen(IM_SIZE)
 elif args.bg == 'indoor':
-    bg_gen = backgrounds.indoor_scene_bg_gen(IM_SIZE)
+    bg_gen = backgrounds.indoor_scene_bg_gen(IM_SIZE, args.bg_img_dir)
 else:
     raise ValueError("No such background generator: {}".format(args.bg))
 
