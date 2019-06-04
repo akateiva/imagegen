@@ -79,7 +79,9 @@ def paste_item_into_image(item, image, angle_range=15):
     subregion = cv2.illuminationChange(subregion, mask[:overhang_x, :overhang_y, :], alpha=1, beta=0.5)
     
     # get the segmentation polygon of the mask ( + offset )
-    segmentation = mask_to_poly(mask) + [x,y]
+    segmentation = mask_to_poly(mask) + [y,x]
+    if args.debug:
+        cv2.drawContours(image, [segmentation], 0, (255, 0, 0), 5)
 
     return image, segmentation
 
