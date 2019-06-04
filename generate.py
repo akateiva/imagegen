@@ -92,15 +92,18 @@ def generate_training_sample(items,
     img = next(bg_generator)
     img_data = dataset.allocate_image(img.shape[0:-1])
     for _, item in items.iterrows():
-        img, segmentation = paste_item_into_image(item, img)
-        dataset.add_annotation({
-            "segmentation": [segmentation.ravel().tolist()],
-            "area": cv2.contourArea(segmentation),
-            "iscrowd": 0,
-            "image_id": img_data['id'],
-            "bbox": list(cv2.boundingRect(segmentation)),
-            "category_id": item['category_id']
-            })
+        try:
+            img, segmentation = paste_item_into_image(item, img)
+            dataset.add_annotation({
+                "segmentation": [segmentation.ravel().tolist()],
+                "area": cv2.contourArea(segmentation),
+                "iscrowd": 0,
+                "image_id": img_data['id'],
+                "bbox": list(cv2.boundingRect(segmentation)),
+                "category_id": item['category_id']
+                })
+        except:
+            print("sample generation failed")
     img = cv2.blur(img,(3,3))
     return img, img_data
 
