@@ -24,7 +24,7 @@ kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(5,5))
 # real wonk
 MAX_TRANSLATE = 0.5
 TRANSLATE_OFFSET = -0
-MAX_SCALE = 1.5
+MAX_SCALE = 0.7
 MIN_SCALE = 0.2
 
 def rotate_item(img, angle):
@@ -76,7 +76,7 @@ def paste_item_into_image(item, image, angle_range=15):
             item_image[:overhang_x, :overhang_y, :],
             where=mask[:overhang_x, :overhang_y, :]>0)
     subregion = image[x: x+w, y:y+h, :]
-    subregion = cv2.illuminationChange(subregion, mask[:overhang_x, :overhang_y, :], alpha=1, beta=0.5)
+    subregion = cv2.illuminationChange(subregion, mask[:overhang_x, :overhang_y, :], alpha=0.2, beta=0.4)
     
     # get the segmentation polygon of the mask ( + offset )
     segmentation = mask_to_poly(mask) + [y,x]
