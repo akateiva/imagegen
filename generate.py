@@ -16,6 +16,7 @@ parser.add_argument('--size', type=int, default=512)
 parser.add_argument("--bg", type = str, default='plain')
 parser.add_argument("--bg-img-dir", type=str, default='/tmp/indoor/*')
 parser.add_argument("--debug", type=bool, default=False)
+parser.add_argument("--hue-shift", type=bool, default=False)
 args = parser.parse_args()
 
 np.random.seed(0)
@@ -31,6 +32,15 @@ def rotate_item(img, angle):
     M = cv2.getRotationMatrix2D((img.shape[1]/2,img.shape[0]/2),angle,1)
     rotated_img = cv2.warpAffine(img,M,img.shape[:2])
     return rotated_img
+
+def hue_shift(img, angle):
+    #angle must be uint8
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    h, s, v = cv2.split(hsv)
+    shift_h = (h + angle) % 180
+    shift_hsv = cv2.merge((shift_h, s, v))
+    shift_img = cv2.cvtColor(shift_hsv, cv2.COLOR_HSV2BGR)
+    return shift_img
 
 
 def mask_to_poly(mask):
@@ -64,6 +74,10 @@ def paste_item_into_image(item, image, angle_range=15):
     mask = rotate_item(mask, angle)
     mask = cv2.erode(mask, kernel, iterations=2)
     
+    if args.hue_shift:
+        hue_shift_amount = np.random.randint(0, 180+1, dtype=np.uint8)
+        item_image = hue_shift(item_image, hue_shift_amount)
+
     overhang_x = image.shape[0] - x - w
     if overhang_x >= 0:
         overhang_x = None
@@ -71,12 +85,13 @@ def paste_item_into_image(item, image, angle_range=15):
     if overhang_y >= 0:
         overhang_y = None
     
+    #subregion = image[x: x+w, y:y+h, :]
+    #subregion = cv2.illuminationChange(subregion, mask[:overhang_x, :overhang_y, :], alpha=0.2, beta=0.4)
+
     # paste the item into the sample
     np.copyto(image[x: x+w, y:y+h, :],
             item_image[:overhang_x, :overhang_y, :],
             where=mask[:overhang_x, :overhang_y, :]>0)
-    subregion = image[x: x+w, y:y+h, :]
-    subregion = cv2.illuminationChange(subregion, mask[:overhang_x, :overhang_y, :], alpha=0.2, beta=0.4)
     
     # get the segmentation polygon of the mask ( + offset )
     segmentation = mask_to_poly(mask) + [y,x]
@@ -92,18 +107,18 @@ def generate_training_sample(items,
     img = next(bg_generator)
     img_data = dataset.allocate_image(img.shape[0:-1])
     for _, item in items.iterrows():
-        try:
-            img, segmentation = paste_item_into_image(item, img)
-            dataset.add_annotation({
-                "segmentation": [segmentation.ravel().tolist()],
-                "area": cv2.contourArea(segmentation),
-                "iscrowd": 0,
-                "image_id": img_data['id'],
-                "bbox": list(cv2.boundingRect(segmentation)),
-                "category_id": item['category_id']
-                })
-        except:
-            print("sample generation failed")
+        #try:
+        img, segmentation = paste_item_into_image(item, img)
+        dataset.add_annotation({
+            "segmentation": [segmentation.ravel().tolist()],
+            "area": cv2.contourArea(segmentation),
+            "iscrowd": 0,
+            "image_id": img_data['id'],
+            "bbox": list(cv2.boundingRect(segmentation)),
+            "category_id": item['category_id']
+            })
+        #except:
+        #    print("sample generation failed")
     img = cv2.blur(img,(3,3))
     return img, img_data
 
@@ -134,6 +149,6 @@ for i in range(0, args.n_samples):
     cv2.imwrite('{}/images/{}'.format(args.out_dir, img_data['file_name']), img)
     if args.debug:
         cv2.imshow('generated', img)
-        cv2.waitKey(1000)
+        cv2.waitKey(10000)
 print("writing annotations.json")
 dataset.write_annotations('{}/annotations.json'.format(args.out_dir))
