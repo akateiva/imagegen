@@ -5,6 +5,7 @@ import backgrounds
 import argparse
 import os
 import cocoset
+import elasticdeform
 
 parser = argparse.ArgumentParser(description='generates synthetic training data')
 parser.add_argument("--item-list", type = str, default="items_contours.pkl")
@@ -15,18 +16,19 @@ parser.add_argument("--n-items-per-sample", type = int, default=2)
 parser.add_argument('--size', type=int, default=512)
 parser.add_argument("--bg", type = str, default='plain')
 parser.add_argument("--bg-img-dir", type=str, default='/tmp/indoor/*')
-parser.add_argument("--debug", type=bool, default=False)
-parser.add_argument("--hue-shift", type=bool, default=False)
+parser.add_argument("--debug", action='store_true')
+parser.add_argument("--hue-shift", action='store_true')
+parser.add_argument("--elastic-transform", action='store_true')
 args = parser.parse_args()
 
 np.random.seed(0)
-kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(5,5))
+kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(11,11))
 
 # real wonk
 MAX_TRANSLATE = 0.5
 TRANSLATE_OFFSET = -0
 MAX_SCALE = 0.7
-MIN_SCALE = 0.2
+MIN_SCALE = 0.3
 
 def rotate_item(img, angle):
     M = cv2.getRotationMatrix2D((img.shape[1]/2,img.shape[0]/2),angle,1)
@@ -60,20 +62,32 @@ def paste_item_into_image(item, image, angle_range=15):
     w = h = int(max(MIN_SCALE, np.random.rand()*MAX_SCALE) * min(image.shape[:-1]))
 
     # we rescale the image and contour to the desired bbox dimensions
+    ## SCALING AND TRANSLATION
     item_image = cv2.imread(os.path.join(args.image_dir, item.img))       # item image
     cnt = item['contour']                                            # the contour
     cnt = (cnt * (w / item_image.shape[0])).astype(int)              # resize contour to desired dimensions
     item_image = cv2.resize(item_image, (w, h))    
 
-    # prepare the mask
+    ## MASK 
     mask = np.zeros(item_image.shape, dtype=np.uint8)
     cv2.drawContours(mask, [cnt], 0, (255, 255, 255), -1)
     
+    ## ROTATION
     angle = np.random.randint(-angle_range, angle_range+1)
     item_image = rotate_item(item_image, angle)
     mask = rotate_item(mask, angle)
+
+
+    # MASK EROSION
     mask = cv2.erode(mask, kernel, iterations=2)
-    
+
+    ## ELASTIC DEFORMATION
+    if args.elastic_transform:
+        [item_image, mask] = elasticdeform.deform_random_grid([item_image, mask], points=5, sigma=5, axis=[(0, 1), (0, 1)])
+
+    cv2.imshow('item mask', mask)
+
+    ## HUE SHIFT
     if args.hue_shift:
         hue_shift_amount = np.random.randint(0, 180+1, dtype=np.uint8)
         item_image = hue_shift(item_image, hue_shift_amount)
@@ -95,8 +109,8 @@ def paste_item_into_image(item, image, angle_range=15):
     
     # get the segmentation polygon of the mask ( + offset )
     segmentation = mask_to_poly(mask) + [y,x]
-    if args.debug:
-        cv2.drawContours(image, [segmentation], 0, (255, 0, 0), 5)
+    #if args.debug:
+        #cv2.drawContours(image, [segmentation], 0, (255, 0, 0), 5)
 
     return image, segmentation
 
