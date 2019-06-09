@@ -19,6 +19,7 @@ parser.add_argument("--bg-img-dir", type=str, default='/tmp/indoor/*')
 parser.add_argument("--debug", action='store_true')
 parser.add_argument("--hue-shift", action='store_true')
 parser.add_argument("--elastic-transform", action='store_true')
+parser.add_argument("--ps-blend", action='store_true')
 args = parser.parse_args()
 
 np.random.seed(0)
@@ -71,19 +72,27 @@ def paste_item_into_image(item, image, angle_range=15):
     ## MASK 
     mask = np.zeros(item_image.shape, dtype=np.uint8)
     cv2.drawContours(mask, [cnt], 0, (255, 255, 255), -1)
+
     
     ## ROTATION
     angle = np.random.randint(-angle_range, angle_range+1)
     item_image = rotate_item(item_image, angle)
     mask = rotate_item(mask, angle)
 
-
     # MASK EROSION
-    mask = cv2.erode(mask, kernel, iterations=2)
+    
+    mask = cv2.erode(mask, kernel, iterations=1)
+    item_image = cv2.bitwise_and(item_image, mask)
+    mask = cv2.dilate(mask, kernel, iterations=1)
+    if args.debug:
+        cv2.imshow('mask', mask)
+        cv2.imshow('item image', item_image)
+
 
     ## ELASTIC DEFORMATION
     if args.elastic_transform:
-        [item_image, mask] = elasticdeform.deform_random_grid([item_image, mask], points=5, sigma=5, axis=[(0, 1), (0, 1)])
+        [item_image, mask] = elasticdeform.deform_random_grid([item_image, mask], points=5, sigma=1, axis=[(0, 1), (0, 1)])
+
 
     ## HUE SHIFT
     if args.hue_shift:
@@ -100,10 +109,18 @@ def paste_item_into_image(item, image, angle_range=15):
     #subregion = image[x: x+w, y:y+h, :]
     #subregion = cv2.illuminationChange(subregion, mask[:overhang_x, :overhang_y, :], alpha=0.2, beta=0.4)
 
-    # paste the item into the sample
-    np.copyto(image[x: x+w, y:y+h, :],
-            item_image[:overhang_x, :overhang_y, :],
-            where=mask[:overhang_x, :overhang_y, :]>0)
+    ## POISSON BLENDING
+    if args.ps_blend:
+        #TODO: compute position 1 -
+        center_x = np.random.randint(item_image.shape[0]/2 + 2, image.shape[0] - item_image.shape[0]/2 - 2 )
+        center_y = np.random.randint(item_image.shape[1]/2 + 2, image.shape[1] - item_image.shape[1]/2 - 2)
+        image = cv2.seamlessClone(item_image, image, mask, (center_y,center_x), cv2.NORMAL_CLONE)
+    else:
+    ## RUFF COPY 
+        # paste the item into the sample
+        np.copyto(image[x: x+w, y:y+h, :],
+                item_image[:overhang_x, :overhang_y, :],
+                where=mask[:overhang_x, :overhang_y, :]>0)
     
     # get the segmentation polygon of the mask ( + offset )
     segmentation = mask_to_poly(mask) + [y,x]
@@ -119,18 +136,18 @@ def generate_training_sample(items,
     img = next(bg_generator)
     img_data = dataset.allocate_image(img.shape[0:-1])
     for _, item in items.iterrows():
-        try:
-            img, segmentation = paste_item_into_image(item, img)
-            dataset.add_annotation({
-                "segmentation": [segmentation.ravel().tolist()],
-                "area": cv2.contourArea(segmentation),
-                "iscrowd": 0,
-                "image_id": img_data['id'],
-                "bbox": list(cv2.boundingRect(segmentation)),
-                "category_id": item['category_id']
-                })
-        except:
-            print("sample generation failed")
+        #try:
+        img, segmentation = paste_item_into_image(item, img)
+        dataset.add_annotation({
+            "segmentation": [segmentation.ravel().tolist()],
+            "area": cv2.contourArea(segmentation),
+            "iscrowd": 0,
+            "image_id": img_data['id'],
+            "bbox": list(cv2.boundingRect(segmentation)),
+            "category_id": item['category_id']
+            })
+        #except:
+        #    print("sample generation failed")
     img = cv2.blur(img,(3,3))
     return img, img_data
 
