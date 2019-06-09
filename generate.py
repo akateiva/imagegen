@@ -61,39 +61,35 @@ def paste_item_into_image(item, image, angle_range=15):
     x, y = ((np.random.rand(2) * MAX_TRANSLATE + TRANSLATE_OFFSET ) * image.shape[:-1]).astype(int)
     #x, y = (np.random.normal(loc=0.3, scale=0.10, size=2)* image.shape[:-1]).astype(int)
     w = h = int(max(MIN_SCALE, np.random.rand()*MAX_SCALE) * min(image.shape[:-1]))
-
     # we rescale the image and contour to the desired bbox dimensions
     ## SCALING AND TRANSLATION
     item_image = cv2.imread(os.path.join(args.image_dir, item.img))       # item image
     cnt = item['contour']                                            # the contour
     cnt = (cnt * (w / item_image.shape[0])).astype(int)              # resize contour to desired dimensions
     item_image = cv2.resize(item_image, (w, h))    
-
     ## MASK 
     mask = np.zeros(item_image.shape, dtype=np.uint8)
     cv2.drawContours(mask, [cnt], 0, (255, 255, 255), -1)
-
-    
     ## ROTATION
     angle = np.random.randint(-angle_range, angle_range+1)
     item_image = rotate_item(item_image, angle)
     mask = rotate_item(mask, angle)
-
     # MASK EROSION
-    
     mask = cv2.erode(mask, kernel, iterations=1)
     item_image = cv2.bitwise_and(item_image, mask)
     mask = cv2.dilate(mask, kernel, iterations=1)
+
+    mask_area = (mask > 1).sum() / 3
+    if mask_area < 32*32:
+        print('dropping', item, 'because mask area=', mask_area)
+        return image, None
+
     if args.debug:
         cv2.imshow('mask', mask)
         cv2.imshow('item image', item_image)
-
-
     ## ELASTIC DEFORMATION
     if args.elastic_transform:
         [item_image, mask] = elasticdeform.deform_random_grid([item_image, mask], points=5, sigma=1, axis=[(0, 1), (0, 1)])
-
-
     ## HUE SHIFT
     if args.hue_shift:
         hue_shift_amount = np.random.randint(0, 180+1, dtype=np.uint8)
@@ -105,13 +101,9 @@ def paste_item_into_image(item, image, angle_range=15):
     overhang_y = image.shape[1] - y - h
     if overhang_y >= 0:
         overhang_y = None
-    
-    #subregion = image[x: x+w, y:y+h, :]
-    #subregion = cv2.illuminationChange(subregion, mask[:overhang_x, :overhang_y, :], alpha=0.2, beta=0.4)
 
     ## POISSON BLENDING
     if args.ps_blend:
-        #TODO: compute position 1 -
         center_x = np.random.randint(item_image.shape[0]/2 + 2, image.shape[0] - item_image.shape[0]/2 - 2 )
         center_y = np.random.randint(item_image.shape[1]/2 + 2, image.shape[1] - item_image.shape[1]/2 - 2)
         image = cv2.seamlessClone(item_image, image, mask, (center_y,center_x), cv2.NORMAL_CLONE)
@@ -136,18 +128,16 @@ def generate_training_sample(items,
     img = next(bg_generator)
     img_data = dataset.allocate_image(img.shape[0:-1])
     for _, item in items.iterrows():
-        #try:
         img, segmentation = paste_item_into_image(item, img)
-        dataset.add_annotation({
-            "segmentation": [segmentation.ravel().tolist()],
-            "area": cv2.contourArea(segmentation),
-            "iscrowd": 0,
-            "image_id": img_data['id'],
-            "bbox": list(cv2.boundingRect(segmentation)),
-            "category_id": item['category_id']
-            })
-        #except:
-        #    print("sample generation failed")
+        if segmentation is not None:
+            dataset.add_annotation({
+                "segmentation": [segmentation.ravel().tolist()],
+                "area": cv2.contourArea(segmentation),
+                "iscrowd": 0,
+                "image_id": img_data['id'],
+                "bbox": list(cv2.boundingRect(segmentation)),
+                "category_id": item['category_id']
+                })
     img = cv2.blur(img,(3,3))
     return img, img_data
 
