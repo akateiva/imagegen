@@ -23,7 +23,7 @@ parser.add_argument("--ps-blend", action='store_true')
 args = parser.parse_args()
 
 np.random.seed(0)
-kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(11,11))
+kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(7,7))
 
 # real wonk
 MAX_TRANSLATE = 0.5
@@ -63,20 +63,25 @@ def paste_item_into_image(item, image, angle_range=15):
     w = h = int(max(MIN_SCALE, np.random.rand()*MAX_SCALE) * min(image.shape[:-1]))
     # we rescale the image and contour to the desired bbox dimensions
     ## SCALING AND TRANSLATION
-    item_image = cv2.imread(os.path.join(args.image_dir, item.img))       # item image
+    item_image = cv2.imread(os.path.join(args.image_dir, item.img))  # item image
     cnt = item['contour']                                            # the contour
     cnt = (cnt * (w / item_image.shape[0])).astype(int)              # resize contour to desired dimensions
     item_image = cv2.resize(item_image, (w, h))    
     ## MASK 
-    mask = np.zeros(item_image.shape, dtype=np.uint8)
+    mask = np.zeros(item_image.shape, dtype=np.uint8) 
+    #mask = np.full(item_image.shape, fill_value=128,dtype=np.uint8)
     cv2.drawContours(mask, [cnt], 0, (255, 255, 255), -1)
     ## ROTATION
     angle = np.random.randint(-angle_range, angle_range+1)
     item_image = rotate_item(item_image, angle)
     mask = rotate_item(mask, angle)
     # MASK EROSION
-    mask = cv2.erode(mask, kernel, iterations=1)
-    item_image = cv2.bitwise_and(item_image, mask)
+    mask = cv2.erode(mask, kernel, iterations=2)
+    #item_image = cv2.bitwise_and(item_image, mask)                  # put image on black bg for poisson blending
+    tmp = np.full(item_image.shape, fill_value=64, dtype=np.uint8)
+    np.copyto(tmp, item_image, where=mask>0)
+    item_image = tmp
+    #item_image = cv2.bitwise_and(item_image, mask)                  # put image on grey bg for poisson
     mask = cv2.dilate(mask, kernel, iterations=1)
 
     mask_area = (mask > 1).sum() / 3
@@ -102,11 +107,18 @@ def paste_item_into_image(item, image, angle_range=15):
     if overhang_y >= 0:
         overhang_y = None
 
+    min_x_position = int(item_image.shape[1]/2)
+    max_x_position = int(image.shape[1] - item_image.shape[1]/2)
+    min_y_position = int(item_image.shape[0]/2)
+    max_y_position = int(image.shape[0] - item_image.shape[0]/2)
+
+
     ## POISSON BLENDING
     if args.ps_blend:
-        center_x = np.random.randint(item_image.shape[0]/2 + 2, image.shape[0] - item_image.shape[0]/2 - 2 )
-        center_y = np.random.randint(item_image.shape[1]/2 + 2, image.shape[1] - item_image.shape[1]/2 - 2)
-        image = cv2.seamlessClone(item_image, image, mask, (center_y,center_x), cv2.NORMAL_CLONE)
+        center_x = np.random.randint(min_x_position, max_x_position)
+        center_y = np.random.randint(min_y_position, max_y_position)
+        print('Image Shape: {}, Item Shape {}, Center: {} {}'.format(image.shape, item_image.shape, center_x, center_y))
+        image = cv2.seamlessClone(item_image, image, mask, (center_x,center_y), cv2.NORMAL_CLONE)
     else:
     ## RUFF COPY 
         # paste the item into the sample
@@ -116,8 +128,6 @@ def paste_item_into_image(item, image, angle_range=15):
     
     # get the segmentation polygon of the mask ( + offset )
     segmentation = mask_to_poly(mask) + [y,x]
-    #if args.debug:
-        #cv2.drawContours(image, [segmentation], 0, (255, 0, 0), 5)
 
     return image, segmentation
 
