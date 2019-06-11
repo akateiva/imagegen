@@ -45,7 +45,6 @@ def hue_shift(img, angle):
     shift_img = cv2.cvtColor(shift_hsv, cv2.COLOR_HSV2BGR)
     return shift_img
 
-
 def mask_to_poly(mask):
     mask_gray = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
     _, contours, _ = cv2.findContours(mask_gray, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
@@ -55,81 +54,77 @@ def mask_to_poly(mask):
     approx = cv2.approxPolyDP(cnt,epsilon,True) 
     return approx
 
-# pastes the item into the image and then returns the image and an annotation
-def paste_item_into_image(item, image, angle_range=15):
-    # first we define the bbox where we going to paste the item
-    x, y = ((np.random.rand(2) * MAX_TRANSLATE + TRANSLATE_OFFSET ) * image.shape[:-1]).astype(int)
-    #x, y = (np.random.normal(loc=0.3, scale=0.10, size=2)* image.shape[:-1]).astype(int)
-    w = h = int(max(MIN_SCALE, np.random.rand()*MAX_SCALE) * min(image.shape[:-1]))
-    # we rescale the image and contour to the desired bbox dimensions
-    ## SCALING AND TRANSLATION
-    item_image = cv2.imread(os.path.join(args.image_dir, item.img))  # item image
-    cnt = item['contour']                                            # the contour
-    cnt = (cnt * (w / item_image.shape[0])).astype(int)              # resize contour to desired dimensions
-    item_image = cv2.resize(item_image, (w, h))    
-    ## MASK 
-    mask = np.zeros(item_image.shape, dtype=np.uint8) 
-    #mask = np.full(item_image.shape, fill_value=128,dtype=np.uint8)
+# returns the center x and y, as well as width and height for a random ROI in an image
+def get_roi(target_im_shape):
+    max_size = min(target_im_shape[:-1]) * MAX_SCALE
+    min_size = min(target_im_shape[:-1]) * MIN_SCALE
+    w = h = np.random.randint(min_size, max_size)
+    min_x_position = int(w/2) + 1
+    max_x_position = int(target_im_shape[1] - w/2)-1
+    min_y_position = int(h /2) + 1
+    max_y_position = int(target_im_shape[0] - h/2)-1
+    x = np.random.randint(min_x_position, max_x_position)
+    y = np.random.randint(min_y_position, max_y_position)
+    return x, y, w, h
+
+def replace_background(target, mask, background_scalar):
+    result = np.full(target.shape, fill_value=background_scalar, dtype=np.uint8)
+    np.copyto(result, target, where=mask>0)
+    return result
+
+
+def paste_item(item, target):
+    x, y, w, h = get_roi(target.shape)
+    
+    # 1. read image, then rescale it and its polygon to the ROI
+    src = cv2.imread(os.path.join(args.image_dir, item.img))
+    if (src is None or target is None):
+        raise ValueError("Image {} could not be read or target image is none!.".format(item.img))
+
+    cnt = (item['contour'] * (w / src.shape[0])).astype(int)
+    src = cv2.resize(src, (w, h))    
+
+    # 2. prepare mask matrix
+    mask = np.zeros(src.shape, dtype=np.uint8)
     cv2.drawContours(mask, [cnt], 0, (255, 255, 255), -1)
-    ## ROTATION
-    angle = np.random.randint(-angle_range, angle_range+1)
-    item_image = rotate_item(item_image, angle)
-    mask = rotate_item(mask, angle)
-    # MASK EROSION
-    mask = cv2.erode(mask, kernel, iterations=2)
-    #item_image = cv2.bitwise_and(item_image, mask)                  # put image on black bg for poisson blending
-    tmp = np.full(item_image.shape, fill_value=64, dtype=np.uint8)
-    np.copyto(tmp, item_image, where=mask>0)
-    item_image = tmp
-    #item_image = cv2.bitwise_and(item_image, mask)                  # put image on grey bg for poisson
-    mask = cv2.dilate(mask, kernel, iterations=1)
 
-    mask_area = (mask > 1).sum() / 3
-    if mask_area < 32*32:
-        print('dropping', item, 'because mask area=', mask_area)
-        return image, None
-
-    if args.debug:
-        cv2.imshow('mask', mask)
-        cv2.imshow('item image', item_image)
-    ## ELASTIC DEFORMATION
+    # 5. Elastic Transform
     if args.elastic_transform:
-        [item_image, mask] = elasticdeform.deform_random_grid([item_image, mask], points=5, sigma=1, axis=[(0, 1), (0, 1)])
-    ## HUE SHIFT
+        # convert to float64 before transforming to avoid uint8 artifacts
+        [src, mask] = elasticdeform.deform_random_grid([src.astype('float64'), mask.astype('float64')], points=3, sigma=15, axis=[(0, 1), (0, 1)])
+        src = src.clip(0, 255).astype('uint8')
+        mask = mask.clip(0, 255).astype('uint8')
+
+    # 3. perform rotation
+    ANGLE_RANGE = 25
+    angle = np.random.randint(-ANGLE_RANGE, ANGLE_RANGE+1)
+    src = rotate_item(src, angle)
+    mask = rotate_item(mask, angle)
+
+    # 4. Mask Fine-Tuning
+    mask = cv2.erode(mask, kernel, iterations=2)
+    src = replace_background(src, mask, 100 )                        # replace background to grey for poisson blending 
+
+    # 6. Hue Shift
     if args.hue_shift:
         hue_shift_amount = np.random.randint(0, 180+1, dtype=np.uint8)
-        item_image = hue_shift(item_image, hue_shift_amount)
+        src = hue_shift(src, hue_shift_amount)
 
-    overhang_x = image.shape[0] - x - w
-    if overhang_x >= 0:
-        overhang_x = None
-    overhang_y = image.shape[1] - y - h
-    if overhang_y >= 0:
-        overhang_y = None
-
-    min_x_position = int(item_image.shape[1]/2)
-    max_x_position = int(image.shape[1] - item_image.shape[1]/2)
-    min_y_position = int(item_image.shape[0]/2)
-    max_y_position = int(image.shape[0] - item_image.shape[0]/2)
-
-
-    ## POISSON BLENDING
+    # 7. Poisson Blending ( Seamless Cloning )
     if args.ps_blend:
-        center_x = np.random.randint(min_x_position, max_x_position)
-        center_y = np.random.randint(min_y_position, max_y_position)
-        print('Image Shape: {}, Item Shape {}, Center: {} {}'.format(image.shape, item_image.shape, center_x, center_y))
-        image = cv2.seamlessClone(item_image, image, mask, (center_x,center_y), cv2.NORMAL_CLONE)
+        mask = cv2.dilate(mask, kernel, iterations=2)
+        target = cv2.seamlessClone(src, target, mask, (x,y), cv2.NORMAL_CLONE)
     else:
-    ## RUFF COPY 
-        # paste the item into the sample
-        np.copyto(image[x: x+w, y:y+h, :],
-                item_image[:overhang_x, :overhang_y, :],
-                where=mask[:overhang_x, :overhang_y, :]>0)
-    
-    # get the segmentation polygon of the mask ( + offset )
-    segmentation = mask_to_poly(mask) + [y,x]
+        # Simple copy
+        np.copyto(target[int(y - h/2):int(y + h/2), int(x - w/2):int(x + w/2), :], src, where=mask>0)
 
-    return image, segmentation
+    # 8. Debug Display
+
+    # 9. Convert mask back to polygon
+    segmentation = mask_to_poly(mask) + [int(x - w/2),int(y - h/2)]
+    #cv2.drawContours(target, [segmentation], 0, (255, 0, 255), 5) # for debugging
+    return target, segmentation
+
 
 # takes the given items and prepares the image and annotations
 def generate_training_sample(items,
@@ -138,7 +133,7 @@ def generate_training_sample(items,
     img = next(bg_generator)
     img_data = dataset.allocate_image(img.shape[0:-1])
     for _, item in items.iterrows():
-        img, segmentation = paste_item_into_image(item, img)
+        img, segmentation = paste_item(item, img)
         if segmentation is not None:
             dataset.add_annotation({
                 "segmentation": [segmentation.ravel().tolist()],
@@ -157,7 +152,7 @@ if args.bg == 'plain':
     bg_gen = backgrounds.random_plain_bg_gen(IM_SIZE)
 elif args.bg == 'noise':
     bg_gen = backgrounds.random_noise_bg_gen(IM_SIZE)
-elif args.bg == 'indoor':
+elif args.bg == 'indoor' or args.bg == 'image':
     bg_gen = backgrounds.indoor_scene_bg_gen(IM_SIZE, args.bg_img_dir)
 else:
     raise ValueError("No such background generator: {}".format(args.bg))
