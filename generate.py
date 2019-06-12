@@ -151,8 +151,8 @@ def generate_training_sample(items,
                     "bbox": list(cv2.boundingRect(segmentation)),
                     "category_id": item['category_id']
                     })
-        except:
-            print('sample generation failed ', item)
+        except AssertionError as error:
+            print('sample generation failed ', item, error)
     img = cv2.blur(img,(3,3))
     return img, img_data
 print(args)
