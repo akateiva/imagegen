@@ -91,8 +91,6 @@ def paste_item(item, target):
     mask = np.zeros(src.shape, dtype=np.uint8)
     cv2.drawContours(mask, [cnt], 0, (255, 255, 255), -1)
 
-
-
     # 3. perform rotation
     ANGLE_RANGE = 25
     angle = ROTATION_RNG.randint(-ANGLE_RANGE, ANGLE_RANGE+1)
@@ -101,7 +99,11 @@ def paste_item(item, target):
 
     # 4. Mask Fine-Tuning
     mask = cv2.erode(mask, kernel, iterations=2)
-    src = replace_background(src, mask, 100 )                        # replace background to grey for poisson blending 
+    src = replace_background(src, mask, 100 )   # replace background to grey for poisson blending 
+
+    mask_area = mask.sum()/255/3
+    assert mask_area > 50*50, 'Mask area under 50x50'
+    print('mask area: {}'.format(mask.sum()/255/3))
 
     # 5. Elastic Transform
     if args.elastic_transform:
@@ -138,16 +140,19 @@ def generate_training_sample(items,
     img = next(bg_generator)
     img_data = dataset.allocate_image(img.shape[0:-1])
     for _, item in items.iterrows():
-        img, segmentation = paste_item(item, img)
-        if segmentation is not None:
-            dataset.add_annotation({
-                "segmentation": [segmentation.ravel().tolist()],
-                "area": cv2.contourArea(segmentation),
-                "iscrowd": 0,
-                "image_id": img_data['id'],
-                "bbox": list(cv2.boundingRect(segmentation)),
-                "category_id": item['category_id']
-                })
+        try:
+            img, segmentation = paste_item(item, img)
+            if segmentation is not None:
+                dataset.add_annotation({
+                    "segmentation": [segmentation.ravel().tolist()],
+                    "area": cv2.contourArea(segmentation),
+                    "iscrowd": 0,
+                    "image_id": img_data['id'],
+                    "bbox": list(cv2.boundingRect(segmentation)),
+                    "category_id": item['category_id']
+                    })
+        except:
+            print('sample generation failed ', item)
     img = cv2.blur(img,(3,3))
     return img, img_data
 print(args)
