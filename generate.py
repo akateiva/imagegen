@@ -57,6 +57,18 @@ def mask_to_poly(mask):
     approx = cv2.approxPolyDP(cnt,epsilon,True) 
     return approx
 
+def get_roi_iou(roi_a, roi_b):
+    xA = int(max(roi_a[0] - roi_a[2] / 2 , roi_b[0] - roi_b[2] / 2))
+    yA = int(max(roi_a[1] - roi_a[3] / 2, roi_b[1] - roi_b[3] / 2 ))
+    xB = int(min(roi_a[0] + roi_a[2] / 2 , roi_b[0] + roi_b[2] / 2))
+    yB = int(min(roi_a[1] + roi_a[3] / 2, roi_b[1] + roi_b[3] / 2 ))
+
+    intersection_area = max(0, xB - xA + 1) * max(0, yB - yA + 1)
+    roi_a_area = roi_a[2] * roi_a[3]
+    roi_b_area = roi_b[2] * roi_b[3]
+    iou = intersection_area / float(roi_a_area + roi_b_area - intersection_area)
+    return iou
+
 # returns the center x and y, as well as width and height for a random ROI in an image
 def get_roi(target_im_shape):
     max_size = min(target_im_shape[:-1]) * MAX_SCALE
@@ -70,14 +82,28 @@ def get_roi(target_im_shape):
     y = ROI_RNG.randint(min_y_position, max_y_position)
     return x, y, w, h
 
+def get_rois(im_shape, n_rois, max_iou=0.25):
+    rois = []
+    while len(rois) < n_rois:
+        candidate_roi = get_roi(im_shape)
+        candidate_doesnt_overlap = True
+        candidate_placement_attempts = 0
+        for roi in rois:
+            iou = get_roi_iou(roi, candidate_roi)
+            print(iou)
+            if iou > max_iou:
+                candidate_doesnt_overlap = False
+        if candidate_doesnt_overlap or candidate_placement_attempts > 5:
+            rois.append(candidate_roi)
+    return rois
+
 def replace_background(target, mask, background_scalar):
     result = np.full(target.shape, fill_value=background_scalar, dtype=np.uint8)
     np.copyto(result, target, where=mask>0)
     return result
 
-
-def paste_item(item, target):
-    x, y, w, h = get_roi(target.shape)
+def paste_item(item, target, roi=None):
+    x, y, w, h = roi
     
     # 1. read image, then rescale it and its polygon to the ROI
     src = cv2.imread(os.path.join(args.image_dir, item.img))
@@ -99,7 +125,7 @@ def paste_item(item, target):
 
     # 4. Mask Fine-Tuning
     mask = cv2.erode(mask, kernel, iterations=2)
-    src = replace_background(src, mask, 100 )   # replace background to grey for poisson blending 
+    src = replace_background(src, mask, 150 )   # replace background to grey for poisson blending 
 
     mask_area = mask.sum()/255/3
     assert mask_area > 32*32, 'Mask area under 32x32'
@@ -108,7 +134,7 @@ def paste_item(item, target):
     # 5. Elastic Transform
     if args.elastic_transform:
         # convert to float64 before transforming to avoid uint8 artifacts
-        [src, mask] = elasticdeform.deform_random_grid([src.astype('float64'), mask.astype('float64')], points=2, sigma=35, axis=[(0, 1), (0, 1)])
+        [src, mask] = elasticdeform.deform_random_grid([src.astype('float64'), mask.astype('float64')], points=3, sigma=w/13, axis=[(0, 1), (0, 1)])
         src = src.clip(0, 255).astype('uint8')
         mask = mask.clip(0, 255).astype('uint8')
 
@@ -138,10 +164,11 @@ def generate_training_sample(items,
         bg_generator,
         angle_range=25):
     img = next(bg_generator)
+    rois = get_rois(img.shape, len(items))
     img_data = dataset.allocate_image(img.shape[0:-1])
-    for _, item in items.iterrows():
+    for roi, (_, item) in zip(rois, items.iterrows()):
         try:
-            img, segmentation = paste_item(item, img)
+            img, segmentation = paste_item(item, img, roi)
             if segmentation is not None:
                 dataset.add_annotation({
                     "segmentation": [segmentation.ravel().tolist()],
