@@ -102,13 +102,13 @@ def paste_item(item, target):
     src = replace_background(src, mask, 100 )   # replace background to grey for poisson blending 
 
     mask_area = mask.sum()/255/3
-    assert mask_area > 50*50, 'Mask area under 50x50'
+    assert mask_area > 32*32, 'Mask area under 32x32'
     print('mask area: {}'.format(mask.sum()/255/3))
 
     # 5. Elastic Transform
     if args.elastic_transform:
         # convert to float64 before transforming to avoid uint8 artifacts
-        [src, mask] = elasticdeform.deform_random_grid([src.astype('float64'), mask.astype('float64')], points=3, sigma=15, axis=[(0, 1), (0, 1)])
+        [src, mask] = elasticdeform.deform_random_grid([src.astype('float64'), mask.astype('float64')], points=2, sigma=35, axis=[(0, 1), (0, 1)])
         src = src.clip(0, 255).astype('uint8')
         mask = mask.clip(0, 255).astype('uint8')
 
@@ -153,7 +153,7 @@ def generate_training_sample(items,
                     })
         except AssertionError as error:
             print('sample generation failed ', item, error)
-    img = cv2.blur(img,(3,3))
+    #img = cv2.blur(img,(5,5))
     return img, img_data
 print(args)
 IM_SIZE = (args.size, args.size)
