@@ -14,10 +14,11 @@ categories = [
 ]
 
 class COCOSet:
-    def __init__(self):
+    def __init__(self, parameters_info = {}):
         self.dataset = {
             "info": {
                 "description": "generated dataset",
+                "parameters": parameters_info
                 },
             "images": [],
             "annotations": [],

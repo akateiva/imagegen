@@ -25,11 +25,14 @@ args = parser.parse_args()
 np.random.seed(0)
 kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(7,7))
 
-# real wonk
-MAX_TRANSLATE = 0.5
-TRANSLATE_OFFSET = -0
 MAX_SCALE = 0.7
 MIN_SCALE = 0.3
+
+ROI_RNG = np.random.RandomState(seed=0)
+ROTATION_RNG = np.random.RandomState(seed=0)
+HUE_SHIFT_RNG = np.random.RandomState(seed=0)
+SAMPLING_RNG = np.random.RandomState(seed=0)
+
 
 def rotate_item(img, angle):
     M = cv2.getRotationMatrix2D((img.shape[1]/2,img.shape[0]/2),angle,1)
@@ -58,13 +61,13 @@ def mask_to_poly(mask):
 def get_roi(target_im_shape):
     max_size = min(target_im_shape[:-1]) * MAX_SCALE
     min_size = min(target_im_shape[:-1]) * MIN_SCALE
-    w = h = np.random.randint(min_size, max_size)
+    w = h = ROI_RNG.randint(min_size, max_size)
     min_x_position = int(w/2) + 1
     max_x_position = int(target_im_shape[1] - w/2)-1
     min_y_position = int(h /2) + 1
     max_y_position = int(target_im_shape[0] - h/2)-1
-    x = np.random.randint(min_x_position, max_x_position)
-    y = np.random.randint(min_y_position, max_y_position)
+    x = ROI_RNG.randint(min_x_position, max_x_position)
+    y = ROI_RNG.randint(min_y_position, max_y_position)
     return x, y, w, h
 
 def replace_background(target, mask, background_scalar):
@@ -88,16 +91,11 @@ def paste_item(item, target):
     mask = np.zeros(src.shape, dtype=np.uint8)
     cv2.drawContours(mask, [cnt], 0, (255, 255, 255), -1)
 
-    # 5. Elastic Transform
-    if args.elastic_transform:
-        # convert to float64 before transforming to avoid uint8 artifacts
-        [src, mask] = elasticdeform.deform_random_grid([src.astype('float64'), mask.astype('float64')], points=3, sigma=15, axis=[(0, 1), (0, 1)])
-        src = src.clip(0, 255).astype('uint8')
-        mask = mask.clip(0, 255).astype('uint8')
+
 
     # 3. perform rotation
     ANGLE_RANGE = 25
-    angle = np.random.randint(-ANGLE_RANGE, ANGLE_RANGE+1)
+    angle = ROTATION_RNG.randint(-ANGLE_RANGE, ANGLE_RANGE+1)
     src = rotate_item(src, angle)
     mask = rotate_item(mask, angle)
 
@@ -105,9 +103,16 @@ def paste_item(item, target):
     mask = cv2.erode(mask, kernel, iterations=2)
     src = replace_background(src, mask, 100 )                        # replace background to grey for poisson blending 
 
+    # 5. Elastic Transform
+    if args.elastic_transform:
+        # convert to float64 before transforming to avoid uint8 artifacts
+        [src, mask] = elasticdeform.deform_random_grid([src.astype('float64'), mask.astype('float64')], points=3, sigma=15, axis=[(0, 1), (0, 1)])
+        src = src.clip(0, 255).astype('uint8')
+        mask = mask.clip(0, 255).astype('uint8')
+
     # 6. Hue Shift
     if args.hue_shift:
-        hue_shift_amount = np.random.randint(0, 180+1, dtype=np.uint8)
+        hue_shift_amount = HUE_SHIFT_RNG.randint(0, 180, dtype=np.uint8)
         src = hue_shift(src, hue_shift_amount)
 
     # 7. Poisson Blending ( Seamless Cloning )
@@ -145,7 +150,7 @@ def generate_training_sample(items,
                 })
     img = cv2.blur(img,(3,3))
     return img, img_data
-
+print(args)
 IM_SIZE = (args.size, args.size)
 ## 1. Prepare background generator
 if args.bg == 'plain':
@@ -162,13 +167,14 @@ items = pd.read_pickle(args.item_list)
 print("Loaded", len(items), "with contours")
 category_item_weights = items.groupby('category_id')['img'].count().apply(lambda x: 1/x).rename('item_weight')
 items = items.join(category_item_weights, on='category_id')
+print("Args", args)
 
 ## 3. Build dataset
-dataset = cocoset.COCOSet()
+dataset = cocoset.COCOSet(parameters_info=vars(args))
 os.makedirs(os.path.join(args.out_dir, 'images/'), exist_ok=True)
 for i in range(0, args.n_samples):
     print("{} / {} ".format(i, args.n_samples))
-    sample_items = items.sample(args.n_items_per_sample, weights=items['item_weight'])
+    sample_items = items.sample(args.n_items_per_sample, weights=items['item_weight'], random_state=SAMPLING_RNG)
     img, img_data = generate_training_sample(sample_items, bg_gen)
     cv2.imwrite('{}/images/{}'.format(args.out_dir, img_data['file_name']), img)
     if args.debug:
